@@ -139,6 +139,152 @@ router.get('/scans/spotlight', auth, async (req, res) => {
   }
 });
 
+// =====================================================
+// CLIENT-SPECIFIED ATTENTION METRICS CALCULATION FUNCTIONS
+// =====================================================
+
+/**
+ * Calculate A2AR (Attention-to-Action Rate) with CLIENT-SPECIFIED formula and tier ranges
+ * FORMULA: A2AR_percent = (qr_downloads / pause_opportunities) * 100
+ * 
+ * TIER RANGES:
+ * - Tier 1 (Low): 0.2% – 0.4%
+ * - Tier 2 (Fair): 0.5% – 0.7%
+ * - Tier 3 (Average): 0.8% – 1.5%
+ * - Tier 4 (Strong): 1.6% – 2.5%
+ * - Tier 5 (Exceptional): 2.6% – 3.0%+
+ * 
+ * GAP HANDLING: Values in gaps snap to nearest tier
+ */
+function calcA2AR(pause_opportunities, qr_downloads) {
+  if (!pause_opportunities || pause_opportunities <= 0) {
+    return { 
+      a2ar_percent: 0, 
+      a2ar_percent_display: 0, 
+      tier: 0, 
+      label: 'N/A' 
+    };
+  }
+
+  const a2ar = (qr_downloads / pause_opportunities) * 100;
+  const a2ar_display = Math.round(a2ar * 100) / 100; // 2 decimals
+
+  let tier = 0, label = 'N/A';
+
+  if (a2ar < 0.2)               { tier = 1; label = 'Low'; }
+  else if (a2ar <= 0.4)         { tier = 1; label = 'Low'; }
+  else if (a2ar < 0.5)          { tier = 1; label = 'Low'; }      // gap snap
+  else if (a2ar <= 0.7)         { tier = 2; label = 'Fair'; }
+  else if (a2ar < 0.8)          { tier = 2; label = 'Fair'; }     // gap snap
+  else if (a2ar <= 1.5)         { tier = 3; label = 'Average'; }
+  else if (a2ar < 1.6)          { tier = 3; label = 'Average'; }  // gap snap
+  else if (a2ar <= 2.5)         { tier = 4; label = 'Strong'; }
+  else if (a2ar < 2.6)          { tier = 4; label = 'Strong'; }   // gap snap
+  else                          { tier = 5; label = 'Exceptional'; }
+
+  return { 
+    a2ar_percent: a2ar, 
+    a2ar_percent_display: a2ar_display, 
+    tier, 
+    label 
+  };
+}
+
+/**
+ * Calculate ASV (Attention Scan Velocity) with CLIENT-SPECIFIED formula and tier ranges
+ * FORMULA: ASV_seconds = scan_timestamp - qr_code_appeared_timestamp
+ * 
+ * TIER RANGES (INVERTED - Lower is Better):
+ * - Tier 1 (Low): > 40 seconds
+ * - Tier 2 (Fair): 20 – 40 seconds
+ * - Tier 3 (Average): 10 – 20 seconds
+ * - Tier 4 (Strong): 5 – 10 seconds
+ * - Tier 5 (Exceptional): < 5 seconds
+ */
+function calcASV(qrAppearTime, scanTime) {
+  if (!qrAppearTime || !scanTime) {
+    return { 
+      asv_seconds: 0, 
+      asv_seconds_display: 0, 
+      tier: 0, 
+      label: 'N/A' 
+    };
+  }
+
+  const appear = new Date(qrAppearTime).getTime();
+  const scan = new Date(scanTime).getTime();
+  
+  const asv = (scan - appear) / 1000;
+  const asv_display = Math.round(asv * 100) / 100; // 2 decimals
+
+  let tier = 0, label = 'N/A';
+
+  if (asv <= 0) {
+    tier = 0; label = 'N/A';
+  } else if (asv > 40) {
+    tier = 1; label = 'Low';
+  } else if (asv > 20) {
+    tier = 2; label = 'Fair';
+  } else if (asv > 10) {
+    tier = 3; label = 'Average';
+  } else if (asv > 5) {
+    tier = 4; label = 'Strong';
+  } else {
+    tier = 5; label = 'Exceptional';
+  }
+
+  return { 
+    asv_seconds: asv, 
+    asv_seconds_display: asv_display, 
+    tier, 
+    label 
+  };
+}
+
+/**
+ * Calculate ACI (Attention Composite Index) with CLIENT-SPECIFIED formula and level ranges
+ * FORMULA:
+ * Step 1: raw_ACI = (A2AR_Tier + ASV_Tier) / 2
+ * Step 2: scaled_ACI = raw_ACI * 2
+ * Step 3: Assign level based on scaled_ACI
+ * 
+ * LEVEL RANGES:
+ * - Level 1 (Low): 2–3
+ * - Level 2 (Fair): 4–5
+ * - Level 3 (Average): 6–7
+ * - Level 4 (Strong): 8–9
+ * - Level 5 (Exceptional): 9–10
+ */
+function calcACI(A2AR_Tier, ASV_Tier) {
+  if (!A2AR_Tier || !ASV_Tier || A2AR_Tier === 0 || ASV_Tier === 0) {
+    return { 
+      raw_ACI: 0, 
+      scaled_ACI: 0, 
+      level: 0, 
+      label: 'N/A' 
+    };
+  }
+
+  const raw_ACI = (A2AR_Tier + ASV_Tier) / 2;
+  const scaled_ACI = raw_ACI * 2;
+  const scaled_ACI_display = Math.round(scaled_ACI * 100) / 100; // 2 decimals
+
+  let level = 0, label = 'N/A';
+
+  if (scaled_ACI >= 9 && scaled_ACI <= 10)      { level = 5; label = 'Exceptional'; }
+  else if (scaled_ACI >= 8 && scaled_ACI < 9)   { level = 4; label = 'Strong'; }
+  else if (scaled_ACI >= 6 && scaled_ACI < 8)   { level = 3; label = 'Average'; }
+  else if (scaled_ACI >= 4 && scaled_ACI < 6)   { level = 2; label = 'Fair'; }
+  else if (scaled_ACI >= 2 && scaled_ACI < 4)   { level = 1; label = 'Low'; }
+
+  return { 
+    raw_ACI: Math.round(raw_ACI * 100) / 100, 
+    scaled_ACI: scaled_ACI_display, 
+    level, 
+    label 
+  };
+}
+
 // GET /api/scans/metrics-by-ip/:ip - Get attention metrics for a specific IP address
 router.get('/scans/metrics-by-ip/:ip', auth, async (req, res) => {
   try {
@@ -157,71 +303,64 @@ router.get('/scans/metrics-by-ip/:ip', auth, async (req, res) => {
         totalScans: 0,
         conversions: 0,
         metrics: {
-          a2ar: { percentage: 0, tier: 1, label: 'N/A', pauseOpportunities: 0, conversions: 0 },
-          asv: { averageSeconds: 0, tier: 0, label: 'N/A' },
-          aci: { score: 0, level: 0, label: 'N/A' }
+          a2ar: { 
+            percentage: 0, 
+            percentageDisplay: 0,
+            tier: 0, 
+            label: 'N/A', 
+            pauseOpportunities: 0, 
+            qrDownloads: 0 
+          },
+          asv: { 
+            averageSeconds: 0, 
+            averageSecondsDisplay: 0,
+            tier: 0, 
+            label: 'N/A' 
+          },
+          aci: { 
+            rawScore: 0,
+            scaledScore: 0, 
+            level: 0, 
+            label: 'N/A' 
+          }
         },
         scans: []
       });
     }
 
-    // Calculate metrics for this IP
-    const totalScans = scans.length;
-    const conversions = scans.filter(s => s.conversion === true).length;
+    // Calculate metrics for this IP using CLIENT-SPECIFIED formulas
+    const totalScans = scans.length; // pause_opportunities
+    const qrDownloads = scans.filter(s => s.conversion === true).length; // verified conversions
     
-    // A2AR: Conversions / Total Scans (treating each scan as a "pause opportunity")
-    const a2arPercentage = totalScans > 0 ? (conversions / totalScans) * 100 : 0;
-    const a2arResult = A2ARMetric.getA2ARTier(a2arPercentage);
+    // A2AR: Using client formula
+    const a2arResult = calcA2AR(totalScans, qrDownloads);
 
-    // ASV: Calculate average time between scan timestamp and conversion
-    // For simplicity, we'll use the time difference between consecutive scans that led to conversion
-    let asvSeconds = null;
-    let asvTier = 0;
-    let asvLabel = 'N/A';
-
-    const convertedScans = scans.filter(s => s.conversion && s.convertedAt);
-    if (convertedScans.length > 0) {
-      // Calculate average time from scan to conversion
-      const scanTimes = convertedScans.map(s => {
+    // ASV: Calculate average time between QR appearance and scan
+    let asvResult = { asv_seconds: 0, asv_seconds_display: 0, tier: 0, label: 'N/A' };
+    
+    // Get scans with conversion timing data
+    const scansWithTiming = scans.filter(s => s.conversion && s.convertedAt);
+    
+    if (scansWithTiming.length > 0) {
+      // Calculate individual ASV for each scan
+      const asvValues = scansWithTiming.map(s => {
         const scanTime = new Date(s.timestamp).getTime();
         const convTime = new Date(s.convertedAt).getTime();
         return (convTime - scanTime) / 1000; // seconds
       }).filter(t => t > 0 && t < 3600); // Filter reasonable times (< 1 hour)
 
-      if (scanTimes.length > 0) {
-        asvSeconds = scanTimes.reduce((a, b) => a + b, 0) / scanTimes.length;
-        asvSeconds = Math.round(asvSeconds * 100) / 100;
-
-        // Calculate ASV tier (lower is better)
-        if (asvSeconds > 40) {
-          asvTier = 1; asvLabel = 'Low';
-        } else if (asvSeconds > 20) {
-          asvTier = 2; asvLabel = 'Fair';
-        } else if (asvSeconds > 10) {
-          asvTier = 3; asvLabel = 'Average';
-        } else if (asvSeconds > 5) {
-          asvTier = 4; asvLabel = 'Strong';
-        } else {
-          asvTier = 5; asvLabel = 'Exceptional';
-        }
+      if (asvValues.length > 0) {
+        // Calculate average ASV
+        const avgAsv = asvValues.reduce((a, b) => a + b, 0) / asvValues.length;
+        
+        // Use calcASV to get tier (pass dummy dates that produce the average)
+        const now = Date.now();
+        asvResult = calcASV(new Date(now - avgAsv * 1000), new Date(now));
       }
     }
 
-    // ACI: Composite of A2AR tier and ASV tier
-    let aciScore = 0;
-    let aciLevel = 0;
-    let aciLabel = 'N/A';
-
-    if (a2arResult.tier > 0 && asvTier > 0) {
-      const rawACI = (a2arResult.tier + asvTier) / 2;
-      aciScore = Math.round(rawACI * 2 * 100) / 100; // Scale to 0-10
-
-      if (aciScore >= 9) { aciLevel = 5; aciLabel = 'Exceptional'; }
-      else if (aciScore >= 8) { aciLevel = 4; aciLabel = 'Strong'; }
-      else if (aciScore >= 6) { aciLevel = 3; aciLabel = 'Average'; }
-      else if (aciScore >= 4) { aciLevel = 2; aciLabel = 'Fair'; }
-      else if (aciScore >= 2) { aciLevel = 1; aciLabel = 'Low'; }
-    }
+    // ACI: Using client formula (composite of A2AR tier and ASV tier)
+    const aciResult = calcACI(a2arResult.tier, asvResult.tier);
 
     // Format scans for response
     const formattedScans = scans.map(s => ({
@@ -232,6 +371,7 @@ router.get('/scans/metrics-by-ip/:ip', auth, async (req, res) => {
       device: s.device,
       conversion: s.conversion,
       conversionAction: s.conversionAction,
+      convertedAt: s.convertedAt,
       program: s.program,
       publisher: s.publisher
     }));
@@ -239,24 +379,27 @@ router.get('/scans/metrics-by-ip/:ip', auth, async (req, res) => {
     res.json({
       ip,
       totalScans,
-      conversions,
+      conversions: qrDownloads,
       metrics: {
         a2ar: {
-          percentage: Math.round(a2arPercentage * 100) / 100,
+          percentage: a2arResult.a2ar_percent,
+          percentageDisplay: a2arResult.a2ar_percent_display,
           tier: a2arResult.tier,
           label: a2arResult.label,
           pauseOpportunities: totalScans,
-          conversions: conversions
+          qrDownloads: qrDownloads
         },
         asv: {
-          averageSeconds: asvSeconds || 0,
-          tier: asvTier,
-          label: asvLabel
+          averageSeconds: asvResult.asv_seconds,
+          averageSecondsDisplay: asvResult.asv_seconds_display,
+          tier: asvResult.tier,
+          label: asvResult.label
         },
         aci: {
-          score: aciScore,
-          level: aciLevel,
-          label: aciLabel
+          rawScore: aciResult.raw_ACI,
+          scaledScore: aciResult.scaled_ACI,
+          level: aciResult.level,
+          label: aciResult.label
         }
       },
       scans: formattedScans
