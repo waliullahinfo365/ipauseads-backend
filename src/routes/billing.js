@@ -298,23 +298,30 @@ router.get('/scans/metrics-by-ip/:ip', auth, async (req, res) => {
     }).sort({ timestamp: -1 }).lean();
 
     if (scans.length === 0) {
-      // Per client requirements: Only send tier/level + label to frontend
       return res.json({
         ip,
         totalScans: 0,
         conversions: 0,
         metrics: {
           a2ar: { 
+            percentage: 0,
+            percentageDisplay: 0,
             tier: 0, 
-            label: 'N/A'
+            label: 'N/A',
+            pauseOpportunities: 0,
+            qrDownloads: 0
           },
           asv: { 
+            averageSeconds: 0,
+            averageSecondsDisplay: 0,
             tier: 0, 
             label: 'N/A' 
           },
           aci: { 
+            rawScore: 0,
+            scaledScore: 0,
             level: 0, 
-            description: 'N/A' 
+            label: 'N/A' 
           }
         },
         singleScan: false,
@@ -370,27 +377,33 @@ router.get('/scans/metrics-by-ip/:ip', auth, async (req, res) => {
       publisher: s.publisher
     }));
 
-    // Per client requirements: Only send tier/level + label to frontend
-    // DO NOT include percentages, seconds, or raw scores in response
+    // Return full metrics data with percentages, seconds, and raw values
     res.json({
       ip,
       totalScans,
       conversions: qrDownloads,
       metrics: {
         a2ar: {
+          percentage: a2arResult.a2ar_percent,
+          percentageDisplay: a2arResult.a2ar_percent_display,
           tier: a2arResult.tier,
-          label: a2arResult.label
+          label: a2arResult.label,
+          pauseOpportunities: totalScans,
+          qrDownloads: qrDownloads
         },
         asv: {
+          averageSeconds: asvResult.asv_seconds,
+          averageSecondsDisplay: asvResult.asv_seconds_display,
           tier: asvResult.tier,
           label: asvResult.label
         },
         aci: {
+          rawScore: aciResult.raw_ACI,
+          scaledScore: aciResult.scaled_ACI,
           level: aciResult.level,
-          description: aciResult.label
+          label: aciResult.label
         }
       },
-      // Note for single scan
       singleScan: totalScans === 1,
       scans: formattedScans
     });
